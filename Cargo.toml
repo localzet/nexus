@@ -1,7 +1,15 @@
 [package]
 name = "nexus_db"
-version = "0.1.0"
+version = "1.0.0"
 edition = "2021"
+description = "Многомодельная СУБД на Rust с поддержкой MVCC, Raft консенсуса и распределённых вычислений"
+authors = ["Ivan Zorin <creator@localzet.com>"]
+license = "AGPL-3.0-only"
+repository = "https://github.com/localzet/nexus"
+homepage = "https://github.com/localzet/nexus"
+documentation = "https://github.com/localzet/nexus/tree/main/docs"
+keywords = ["database", "sql", "mvcc", "raft", "sharding"]
+categories = ["database-implementations"]
 
 [[bin]]
 name = "nexus"
