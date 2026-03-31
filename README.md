@@ -1,12 +1,12 @@
-# NexusDB
+# NexusDB — Многомодельная СУБД нового поколения
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
-[![Build Status](https://img.shields.io/badge/tests-317%20passing-brightgreen)](#testing)
-[![Rust 1.70+](https://img.shields.io/badge/Rust-1.70+-orange.svg)](https://www.rust-lang.org/)
+[![Tests: 317 passing](https://img.shields.io/badge/tests-317%20passing-brightgreen)](#testing)
+[![Version: 1.0.0](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/localzet/nexus/releases)
 
-Полнофункциональная многомодельная СУБД на Rust с поддержкой MVCC, Raft консенсуса и распределённых вычислений.
+**Современная база данных для приложений, которым нужны SQL + JSON + графы + векторы в одной системе**
 
-**English:** [README.md](./docs/guide-en.md)
+NexusDB — это полнофункциональная многомодельная СУБД, позволяющая работать со всеми типами данных без необходимости синхронизировать несколько отдельных сервисов. Написана на Rust для максимальной произв
 
 ## ✨ Возможности
 
@@ -21,98 +21,113 @@
 ## 🚀 Быстрый старт
 
 ```bash
-# Клонирование репозитория
+# На Docker (проще всего)
+docker run -d --name nexus -p 5433:5433 ghcr.io/localzet/nexus:latest
+
+# Или из исходников
 git clone https://github.com/localzet/nexus.git
-cd nexus
-
-# Сборка
-cargo build --release
-
-# Тестирование
-cargo test --lib
+cd nexus && cargo build --release
+./target/release/nexus
 ```
+
+Сервер запустится на **порту 5433** с NQL протоколом.
 
 ## 📚 Документация
 
-- [Руководство пользователя](./docs/guide-ru.md)
-- [Архитектура системы](./docs/architecture-ru.md)
-- [API Справочник](./docs/api-reference-ru.md)
-- [Примеры использования](./docs/examples-ru.md)
-- [Производительность](./docs/performance-ru.md)
+**Quick Links:**
+- [NQL Specification](./docs/NQL-specification.md) — Полный протокол (JSON commands)
+- [NQL Examples](./docs/NQL-EXAMPLES.md) — Примеры на Python, TypeScript, PHP  
+- [Client Libraries](./clients/README.md) — Python, TypeScript, PHP SDKs
 
-**English Documentation:**
-- [User Guide](./docs/guide-en.md)
-- [System Architecture](./docs/architecture-en.md)
-- [API Reference](./docs/api-reference-en.md)
+**Architecture & Design:**
+- [System Architecture](./docs/architecture-ru.md) — Как устроена NexusDB
+- [MVCC Transactions](./docs/MVCC.md) — Параллельные транзакции ACID
+- [Raft Replication](./docs/Raft.md) — Консенсус и кластеризация
 
-## 💡 Примеры
+## 💡 Примеры использования
 
-### Базовое использование
+### Python Client
 
-```rust
-use nexus_db::{MultiModelEngine, QueryExecutor};
+```python
+from nexus import NexusClient
 
-fn main() -> anyhow::Result<()> {
-    let mut engine = MultiModelEngine::new();
-    
-    // Создание таблицы
-    engine.create_table("users", vec!["id", "name", "email"])?;
-    
-    // Вставка данных
-    engine.insert("users", vec![
-        vec!["1".into(), "Alice".into(), "alice@example.com".into()],
-    ])?;
-    
-    // Запрос
-    let results = engine.execute("SELECT * FROM users WHERE id = 1")?;
-    
-    Ok(())
+client = NexusClient("localhost", 5433)
+
+# Create table
+client.create_table("users", [
+    ("id", "integer", {"primary_key": true}),
+    ("name", "varchar", {"length": 100}),
+    ("email", "varchar", {"length": 100})
+])
+
+# Insert
+client.insert("users", {"id": 1, "name": "Alice", "email": "alice@example.com"})
+
+# Select
+result = client.select("users", where={"field": "id", "eq": 1})
+print(result.rows)
+```
+
+### TypeScript Client
+
+```typescript
+import { NexusClient } from "nexus-db";
+
+const client = new NexusClient("localhost", 5433);
+
+const result = await client.select(
+    "users",
+    ["id", "name", "email"],
+    { field: "id", eq: 1 }
+);
+console.log(result.rows);
+```
+
+### PHP Client
+
+```php
+use NexusDB\NexusClient;
+
+$client = new NexusClient("localhost", 5433);
+
+$result = $client->select(
+    "users",
+    columns: ["id", "name", "email"],
+    where: ["field" => "id", "eq" => 1]
+);
+foreach ($result->rows as $row) {
+    echo $row["name"];
 }
-```
-
-### Window Functions
-
-```sql
-SELECT 
-    name, 
-    salary,
-    ROW_NUMBER() OVER (ORDER BY salary DESC) as rank
-FROM employees;
-```
-
-### Recursive CTEs
-
-```sql
-WITH RECURSIVE org_tree AS (
-    SELECT id, name, manager_id, 1 as level
-    FROM employees 
-    WHERE manager_id IS NULL
-    
-    UNION ALL
-    
-    SELECT e.id, e.name, e.manager_id, t.level + 1
-    FROM employees e
-    JOIN org_tree t ON e.manager_id = t.id
-)
-SELECT * FROM org_tree WHERE level <= 5;
 ```
 
 ## 📊 Архитектура
 
 ```
-┌─ Query Processing ─────────┐
-│ Parser • Executor • Optimizer │
-└────────────────────────────┘
+┌─── NQL Protocol (Port 5433) ────┐
+│  JSON-based command interface    │
+│  TCP Native Connection           │
+└────────────────────────────────┘
          ↓
-┌─ Storage Layer ────────────┐
-│ MVCC • Transactions • Cache   │
-│ Indexes • WAL                │
-└────────────────────────────┘
+┌─ Query Processing ────────────┐
+│ Parser • Optimizer • Executor  │
+├────────────────────────────────┤
+│ SELECT • INSERT • UPDATE        │
+│ Transactions • Aggregations     │
+│ Graphs • Vectors • Full-text    │
+└────────────────────────────────┘
          ↓
-┌─ Distribution Layer ───────┐
-│ Raft • Sharding • Replication │
-└────────────────────────────┘
+┌─ Storage Layer ───────────────┐
+│ MVCC • Transactions • Cache    │
+│ B-Tree Indexes • WAL           │
+└────────────────────────────────┘
+         ↓
+┌─ Distribution (Optional) ─────┐
+│ Raft Consensus • Replication   │
+│ Sharding • Failover            │
+└────────────────────────────────┘
 ```
+
+**Single Protocol:** NQL (JSON) — всё работает через единый TCP порт 5433
 
 ## 🔧 Функциональность
 

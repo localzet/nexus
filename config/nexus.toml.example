@@ -1,0 +1,113 @@
+# NexusDB Configuration Template
+
+[server]
+# Server listening address
+host = "0.0.0.0"
+
+# TCP port for NQL protocol (unified interface)
+tcp_port = 5433
+
+# TLS/SSL settings (optional)
+# tls_cert = "/etc/nexus/server.crt"
+# tls_key = "/etc/nexus/server.key"
+
+[database]
+# Data directory for persistent storage
+data_dir = "/var/lib/nexus"
+
+# Buffer cache size in MB
+cache_size_mb = 2048
+
+# Maximum concurrent connections
+max_connections = 1000
+
+# WAL (Write-Ahead Log) directory
+wal_dir = "/var/lib/nexus/wal"
+
+# Checkpoint interval (seconds)
+checkpoint_interval_secs = 300
+
+[logging]
+# Log level: TRACE, DEBUG, INFO, WARN, ERROR
+level = "INFO"
+
+# Log format: text or json
+format = "text"
+
+# Log file (empty = stdout)
+file = "/var/log/nexus/nexus.log"
+
+[replication]
+# Enable Raft consensus for high availability
+enable_raft = false
+
+# Raft node ID (unique per cluster)
+node_id = "node-1"
+
+# Cluster peers: ["host1:6379", "host2:6379", ...]
+cluster_nodes = []
+
+# Raft snapshot interval (ops)
+snapshot_interval = 10000
+
+[performance]
+# Enable query result caching
+enable_query_cache = true
+
+# Query cache size in MB
+query_cache_mb = 512
+
+# Enable full-text search indexing
+enable_fulltext = true
+
+# Enable query plan caching
+enable_plan_cache = true
+
+# Plan cache size in entries
+plan_cache_entries = 1000
+
+# Enable parallel query execution
+enable_parallel = true
+
+# Number of worker threads (0 = auto-detect CPU count)
+worker_threads = 0
+
+[security]
+# Enable authentication
+auth_enabled = false
+
+# Default user credentials (for first setup)
+# Change these in production!
+default_user = "nexus"
+default_password = "nexus"
+
+# JWT secret for token-based auth
+# jwt_secret = "your-secret-key-change-in-production"
+
+# JWT token expiry (seconds)
+jwt_expiry_secs = 3600
+
+[monitoring]
+# Enable Prometheus metrics endpoint (/metrics)
+enable_prometheus = true
+
+# Enable slow query logging
+enable_slow_query_log = true
+
+# Slow query threshold (milliseconds)
+slow_query_threshold_ms = 100
+
+# Enable query execution tracing
+enable_tracing = false
+
+[network]
+# TCP keep-alive settings
+keepalive_interval_secs = 60
+keepalive_timeout_secs = 120
+
+# Request timeout (seconds)
+request_timeout_secs = 300
+
+# Connection pool settings
+pool_min_idle = 5
+pool_max_size = 100

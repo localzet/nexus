@@ -1,0 +1,292 @@
+name: "NexusDB CI/CD"
+
+on:
+  push:
+    branches: [main, develop]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.70"
+
+jobs:
+  # ========== TESTING ==========
+  test:
+    name: "Unit & Integration Tests"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: "Install Rust"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+      
+      - name: "Cache cargo registry"
+        uses: actions/cache@v3
+        with:
+          path: ~/.cargo/registry
+          key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: "Cache cargo build"
+        uses: actions/cache@v3
+        with:
+          path: target
+          key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+      
+      - name: "Run tests"
+        run: cargo test --lib --verbose
+      
+      - name: "Check compilation"
+        run: cargo check --all-features
+
+  # ========== LINT & FORMAT ==========
+  lint:
+    name: "Lint & Format"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: "Install Rust"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: clippy, rustfmt
+      
+      - name: "Format check"
+        run: cargo fmt -- --check
+      
+      - name: "Clippy lint"
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+  # ========== SECURITY AUDIT ==========
+  audit:
+    name: "Security Audit"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: "Install Rust"
+        uses: dtolnay/rust-toolchain@stable
+      
+      - name: "Install cargo-audit"
+        run: cargo install cargo-audit
+      
+      - name: "Run security audit"
+        run: cargo audit --deny warnings
+        continue-on-error: true
+
+  # ========== BUILD BINARY ==========
+  build-binary:
+    name: "Build Binary"
+    needs: [test, lint]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            target: x86_64-unknown-linux-gnu
+            artifact: nexus
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            artifact: nexus
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            artifact: nexus.exe
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: "Install Rust"
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      
+      - name: "Build release"
+        run: cargo build --release --target ${{ matrix.target }}
+      
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@v3
+        with:
+          name: nexus-${{ matrix.target }}
+          path: target/${{ matrix.target }}/release/${{ matrix.artifact }}
+          retention-days: 5
+
+  # ========== BUILD DEBIAN PACKAGE ==========
+  build-deb:
+    name: "Build Debian Package"
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: "Install dependencies"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cargo rustc debhelper devscripts fakeroot
+      
+      - name: "Build release binary"
+        run: cargo build --release
+      
+      - name: "Create debian package structure"
+        run: |
+          mkdir -p debian/DEBIAN
+          mkdir -p debian/usr/bin
+          mkdir -p debian/etc/nexus
+          mkdir -p debian/systemd/system
+          mkdir -p debian/var/lib/nexus
+          
+          # Copy binary
+          cp target/release/nexus debian/usr/bin/nexus
+          chmod +x debian/usr/bin/nexus
+          
+          # Create config template
+          cat > debian/etc/nexus/nexus.toml << 'EOF'
+          [server]
+          host = "0.0.0.0"
+          tcp_port = 5433
+          rest_port = 8080
+          
+          [database]
+          data_dir = "/var/lib/nexus"
+          cache_size_mb = 2048
+          max_connections = 1000
+          EOF
+          
+          # Systemd service file
+          cat > debian/systemd/system/nexus.service << 'EOF'
+          [Unit]
+          Description=NexusDB - Multi-Model Database
+          After=network.target
+          
+          [Service]
+          Type=simple
+          User=nexus
+          ExecStart=/usr/bin/nexus
+          Restart=on-failure
+          RestartSec=5
+          StandardOutput=journal
+          StandardError=journal
+          
+          [Install]
+          WantedBy=multi-user.target
+          EOF
+          
+          # Postinst script
+          cat > debian/DEBIAN/postinst << 'EOF'
+          #!/bin/bash
+          set -e
+          
+          # Create nexus user if not exists
+          if ! getent passwd nexus > /dev/null; then
+            useradd -r -s /usr/sbin/nologin -m -d /var/lib/nexus nexus
+          fi
+          
+          # Fix permissions
+          chown -R nexus:nexus /var/lib/nexus
+          chown -R nexus:nexus /etc/nexus
+          chmod 755 /var/lib/nexus
+          
+          # Enable systemd service
+          systemctl daemon-reload
+          systemctl enable nexus || true
+          
+          echo "NexusDB installed successfully!"
+          echo "Start with: systemctl start nexus"
+          EOF
+          chmod 755 debian/DEBIAN/postinst
+          
+          # Control file
+          cat > debian/DEBIAN/control << 'EOF'
+          Package: nexus-db
+          Version: 1.0.0
+          Architecture: amd64
+          Maintainer: Ivan Zorin <creator@localzet.com>
+          Description: NexusDB - Multi-Model Database Engine
+           Multi-model database supporting SQL, JSON, Graphs, and Vectors
+          Homepage: https://github.com/localzet/nexus
+          EOF
+      
+      - name: "Build package"
+        run: |
+          fakeroot dpkg-deb --build debian nexus-db_1.0.0_amd64.deb
+          ls -lh *.deb
+      
+      - name: "Upload artifact"
+        uses: actions/upload-artifact@v3
+        with:
+          name: nexus-deb
+          path: "*.deb"
+          retention-days: 10
+
+  # ========== BUILD DOCKER IMAGE ==========
+  build-docker:
+    name: "Build & Push Docker Image"
+    needs: [test, lint]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: "Set up QEMU"
+        uses: docker/setup-qemu-action@v2
+      
+      - name: "Set up Docker Buildx"
+        uses: docker/setup-buildx-action@v2
+      
+      - name: "Log in to Container Registry"
+        uses: docker/login-action@v2
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: "Extract metadata"
+        id: meta
+        uses: docker/metadata-action@v4
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+      
+      - name: "Build and push Docker image"
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: linux/amd64,linux/arm64
+
+  # ========== CREATE RELEASE ==========
+  release:
+    name: "Create GitHub Release"
+    needs: [build-binary, build-deb, build-docker]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: "Download all artifacts"
+        uses: actions/download-artifact@v3
+      
+      - name: "Create Release"
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            nexus-*/*.exe
+            nexus-*/nexus
+            nexus-deb/*.deb
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
