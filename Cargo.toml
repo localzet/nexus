@@ -29,7 +29,7 @@ sqlparser = "0.45"
 # Хранилище и индексы
 dashmap = "5.5"
 parking_lot = "0.12"
-lru = "0.12"
+lru = "0.16"
 
 # Утилиты
 uuid = { version = "1.6", features = ["v4", "serde"] }
