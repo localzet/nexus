@@ -1,7 +1,4 @@
-/// ═══════════════════════════════════════════════════════════════════════════════
-/// NEXUS DB - Integration Tests for All Phases
-/// Tests comprehensively validate all 4 phases working together
-/// ═══════════════════════════════════════════════════════════════════════════════
+//! Integration Tests - комплексная промежуточная тестирание всех модулей
 
 use nexus_db::{
     MultiModelEngine, ColumnDef, ColumnType, Row, Value, RecordId, Document, 
